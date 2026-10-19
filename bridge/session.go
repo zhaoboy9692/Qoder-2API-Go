@@ -165,6 +165,11 @@ func (b *OpenAiBridge) fetchAccountStatus(ctx context.Context, userID string) (*
 func (b *OpenAiBridge) EnsureAccountStatus(ctx context.Context) *auth.AccountStatus {
 	if err := b.EnsureFreshSession(ctx); err != nil {
 		log.Printf("[bridge] WARN account status unavailable (session: %v)", err)
+		if ae, ok := err.(*auth.AuthError); ok {
+			log.Printf("[bridge] AUTH-DETAIL status=%d detail=%s", ae.StatusCode, ae.Detail)
+		} else {
+			log.Printf("[bridge] AUTH-DETAIL err=%+v", err)
+		}
 		return b.AccountStatus()
 	}
 	userID := ""

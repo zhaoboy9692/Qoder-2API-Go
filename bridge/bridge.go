@@ -153,11 +153,30 @@ func (b *OpenAiBridge) Label() string {
 	return "pt-****(" + b.Region.Name + ")"
 }
 
+// NewOpenAiBridgeWithConcurrency behaves like NewOpenAiBridge but sizes the
+// per-account upstream concurrency window from n (panel value). n < 1 falls
+// back to the env/default. The swap happens before the bridge is published,
+// so it is race-free.
+func NewOpenAiBridgeWithConcurrency(pat string, region *auth.RegionConfig, n int) *OpenAiBridge {
+	b := NewOpenAiBridge(pat, region)
+	if n >= 1 {
+		b.chatSlots = make(chan struct{}, n)
+	}
+	return b
+}
+
 // maxUpstreamConcurrency returns the per-PAT limit on concurrent upstream
 // chat requests. The Qoder gateway enforces a strict per-account admission
 // window per model and rejects excess requests with business code 10605
 // (delivered over HTTP 401/403), so requests are queued locally by default
 // instead of tripping the gateway limiter. Override via QODER_MAX_CONCURRENCY.
+// MaxConcurrencyFromEnv reports the QODER_MAX_CONCURRENCY override (1 when
+// unset or invalid). The panel's per-account concurrency value takes
+// precedence when set; this is the fallback.
+func MaxConcurrencyFromEnv() int {
+	return maxUpstreamConcurrency()
+}
+
 func maxUpstreamConcurrency() int {
 	if v := os.Getenv("QODER_MAX_CONCURRENCY"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 32 {

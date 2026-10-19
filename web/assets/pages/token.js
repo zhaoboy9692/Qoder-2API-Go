@@ -66,6 +66,37 @@ PAGE('token', {
     }
   },
   /* 检测：经临时会话查询一次真实额度并落快照；每次检测都是一次完整会话引导，勿高频点击 */
+  /* 启用/停用：停用者不参与路由与自动切换、跳过定时签到 */
+  toggleAccountEnabled(acc){
+    const disabling = !acc.disabled;
+    const doIt = ()=>this.busy(async()=>{
+      await this.api('/admin/api/accounts/enabled',{method:'POST',body:JSON.stringify({
+        id: acc.id, disabled: disabling })});
+      this.toast(disabling ? '账号已停用' : '账号已启用','ok');
+      this.loadAccounts();
+    })();
+    if(disabling && acc.active){
+      this.askConfirm('停用主账号','该账号当前被标记为主账号。停用后路由会跳过它（负载均衡开启时立即生效）。', doIt, {okText:'仍要停用', danger:false});
+    } else doIt();
+  },
+
+  /* 批量检测：串行逐个检测全部账号，避免同时引导多个会话触发上游风控 */
+  async checkAllAccounts(){
+    if(this.bulkChecking) return;
+    this.bulkChecking = true;
+    let ok = 0, fail = 0;
+    try{
+      for(const acc of (this.accounts||[])){
+        try{
+          await this.api('/admin/api/accounts/check',{method:'POST',body:JSON.stringify({id:acc.id})});
+          ok++;
+        }catch(e){ fail++; }
+        this.loadAccounts();
+      }
+      this.toast(`全部检测完成：成功 ${ok}，失败 ${fail}`, fail ? 'err' : 'ok');
+    } finally { this.bulkChecking = false; this.loadAccounts(); }
+  },
+
   async checkAccount(acc){
     this.checkingId = acc.id;
     try{
@@ -139,6 +170,7 @@ PAGE('token', {
   /* 状态：按实时在途判断账号是否正在服务请求（而非“默认账号”标记）。
    * 多个对话并发时，会有多个账号同时显示「使用中」。 */
   accountStatus(acc){
+    if(acc.disabled) return '已停用';
     const s = acc.snapshot;
     if(!s || !s.checked_at) return '未检测';
     if(s.last_error) return '检测失败';
@@ -165,6 +197,7 @@ PAGE('token', {
         strategy: r.strategy || 'sticky',
         sticky_limit: r.sticky_limit || 30,
         max_retry_accounts: r.max_retry_accounts || 3,
+        max_concurrency: r.max_concurrency || 1,
       };
     }catch(e){ this.toast(e.message,'err'); }
   },
@@ -176,10 +209,13 @@ PAGE('token', {
     if(!Number.isFinite(sticky) || sticky < 1){ this.toast('粘性次数需不小于 1','err'); return; }
     const retry = Number(as.max_retry_accounts);
     if(!Number.isFinite(retry) || retry < 1 || retry > 16){ this.toast('最大重试账号数需在 1..16 之间','err'); return; }
+    const conc = Number(as.max_concurrency);
+    if(!Number.isFinite(conc) || conc < 1 || conc > 32){ this.toast('单账号并发上限需在 1..32 之间','err'); return; }
     this.busy(async()=>{
       await this.api('/admin/api/accounts/auto',{method:'POST',body:JSON.stringify({
         enabled: !!as.enabled, threshold: t, strategy: as.strategy,
-        sticky_limit: sticky, max_retry_accounts: retry })});
+        sticky_limit: sticky, max_retry_accounts: retry,
+        max_concurrency: conc })});
       this.toast('负载均衡设置已保存','ok');
     })();
   },

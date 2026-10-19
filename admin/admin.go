@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"qoder2api/auth"
+	"qoder2api/bridge"
 	"qoder2api/logs"
 	"qoder2api/models"
 	"qoder2api/stats"
@@ -109,6 +110,7 @@ func (a *Admin) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/pat", a.requireAuth(a.handlePAT))
 	mux.HandleFunc("/admin/api/accounts", a.requireAuth(a.handleAccounts))
 	mux.HandleFunc("/admin/api/accounts/switch", a.requireAuth(a.handleAccountSwitch))
+	mux.HandleFunc("/admin/api/accounts/enabled", a.requireAuth(a.handleAccountEnabled))
 	mux.HandleFunc("/admin/api/accounts/note", a.requireAuth(a.handleAccountNote))
 	mux.HandleFunc("/admin/api/accounts/weight", a.requireAuth(a.handleAccountWeight))
 	mux.HandleFunc("/admin/api/accounts/check", a.requireAuth(a.handleAccountCheck))
@@ -699,6 +701,7 @@ type accountView struct {
 	Note      string                 `json:"note"`
 	Region    string                 `json:"region"`
 	Weight    int                    `json:"weight"`
+	Disabled  bool                   `json:"disabled"`
 	CreatedAt int64                  `json:"created_at"`
 	Active    bool                   `json:"active"`
 	InFlight  int                    `json:"in_flight"`
@@ -736,6 +739,7 @@ func accountViews(accounts []store.Account, activeID string, runtime AccountRunt
 			Note:              acc.Note,
 			Region:            region,
 			Weight:            store.AccountWeight(acc),
+			Disabled:          acc.Disabled,
 			CreatedAt:         acc.CreatedAt,
 			Active:            acc.ID == activeID,
 			InFlight:          inflight,
@@ -889,6 +893,28 @@ func (a *Admin) handleAccountWeight(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
 
+// handleAccountEnabled serves POST /admin/api/accounts/enabled: toggles a pool
+// account's participation in routing / auto-switch / scheduled check-ins.
+func (a *Admin) handleAccountEnabled(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, 405, "方法不允许")
+		return
+	}
+	var body struct {
+		ID       string `json:"id"`
+		Disabled bool   `json:"disabled"`
+	}
+	if err := readJSON(w, r, &body); err != nil {
+		writeJSONError(w, 400, "请求格式错误")
+		return
+	}
+	if err := a.store.SetAccountEnabled(body.ID, body.Disabled); err != nil {
+		writeJSONError(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
 // handleAccountCheck serves POST /admin/api/accounts/check {id?}: probes one
 // account (default: the active one) through a throwaway bridge and stores the
 // returned quota snapshot. This is the only account-side upstream call —
@@ -1007,12 +1033,17 @@ func (a *Admin) handleAutoSwitch(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		as := a.store.GetAutoSwitch()
+		mc := a.store.GetMaxConcurrency()
+		if mc <= 0 {
+			mc = bridge.MaxConcurrencyFromEnv()
+		}
 		writeJSON(w, 200, map[string]interface{}{
 			"enabled":            as.Enabled,
 			"threshold":          as.Threshold,
 			"strategy":           as.Strategy,
 			"sticky_limit":       as.StickyLimit,
 			"max_retry_accounts": as.MaxRetryAccounts,
+			"max_concurrency":    mc,
 		})
 	case http.MethodPost:
 		var body struct {
@@ -1021,6 +1052,7 @@ func (a *Admin) handleAutoSwitch(w http.ResponseWriter, r *http.Request) {
 			Strategy         string  `json:"strategy"`
 			StickyLimit      int     `json:"sticky_limit"`
 			MaxRetryAccounts int     `json:"max_retry_accounts"`
+			MaxConcurrency   int     `json:"max_concurrency"`
 		}
 		if err := readJSON(w, r, &body); err != nil {
 			writeJSONError(w, 400, "请求格式错误")
@@ -1041,6 +1073,12 @@ func (a *Admin) handleAutoSwitch(w http.ResponseWriter, r *http.Request) {
 		if err := a.store.SetAutoSwitchConfig(cfg); err != nil {
 			writeJSONError(w, 400, err.Error())
 			return
+		}
+		if body.MaxConcurrency > 0 {
+			if err := a.store.SetMaxConcurrency(body.MaxConcurrency); err != nil {
+				writeJSONError(w, 400, err.Error())
+				return
+			}
 		}
 		writeJSON(w, 200, map[string]string{"status": "ok"})
 	default:
@@ -1073,11 +1111,28 @@ func (a *Admin) handleStats(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, 405, "方法不允许")
 		return
 	}
+	var out map[string]interface{}
 	if a.stats == nil {
-		writeJSON(w, 200, stats.Report{})
-		return
+		// 无 recorder 时仍返回零值结构（total=0 等），保持 API 形状稳定。
+		raw, _ := json.Marshal(stats.Report{})
+		out = map[string]interface{}{}
+		_ = json.Unmarshal(raw, &out)
+	} else {
+		raw, err := json.Marshal(a.stats.Report())
+		if err != nil {
+			writeJSONError(w, 500, err.Error())
+			return
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			writeJSONError(w, 500, err.Error())
+			return
+		}
 	}
-	writeJSON(w, 200, a.stats.Report())
+	// 池内各账号的额度快照：统计页「额度明细」按账号逐行展示（多账号时），
+	// 数据来自被动扣减 + 周期权威刷新，口径为账号级官方额度。
+	out["pool_accounts"] = accountViews(a.store.ListAccounts(), a.store.GetActiveAccountID(), a.accountRuntime)
+	out["load_balance"] = a.store.GetAutoSwitch()
+	writeJSON(w, 200, out)
 }
 
 // --- Logs endpoint ---

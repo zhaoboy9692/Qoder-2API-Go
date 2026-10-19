@@ -57,8 +57,11 @@ var CN = &RegionConfig{
 // OpenAPI bearer token.
 var Global = &RegionConfig{
 	Name:              "global",
-	AuthBase:          "https://api1.qoder.sh",
-	ChatBase:          "https://api1.qoder.sh",
+	// 国际区端点采用线上多实例实测可用的组合：center 负责鉴权（jobToken/status），
+	// api3 负责聊天 SSE，openapi 负责额度。上游曾用 api1.qoder.sh（另一 CA 节点），
+	// 国际 PAT 会话建立全 401；改回本组合后国际账号会话/对话/额度全部正常。
+	AuthBase:          "https://center.qoder.sh",
+	ChatBase:          "https://api3.qoder.sh",
 	OpenAPIBase:       "https://openapi.qoder.sh",
 	NeedsOpenAPIToken: true,
 }

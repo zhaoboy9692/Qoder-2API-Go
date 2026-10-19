@@ -59,6 +59,9 @@ type Config struct {
 	Accounts        []Account  `json:"accounts,omitempty"`
 	ActiveAccountID string     `json:"active_account_id,omitempty"`
 	AutoSwitch      AutoSwitch `json:"auto_switch"`
+	// MaxConcurrency 是面板可调的单账号上游并发上限；0 表示未设置
+	//（回退 QODER_MAX_CONCURRENCY 环境变量，再回退 1）。
+	MaxConcurrency int `json:"max_concurrency,omitempty"`
 	// CheckinTime is the default daily check-in time ("HH:MM", local server
 	// time). Accounts may override it with their own CheckinTime.
 	CheckinTime string `json:"checkin_time,omitempty"`
@@ -81,6 +84,9 @@ type Account struct {
 	Weight    int              `json:"weight,omitempty"`
 	CreatedAt int64            `json:"created_at"`
 	Snapshot  *AccountSnapshot `json:"snapshot,omitempty"`
+	// Disabled 为 true 时该账号不参与负载均衡，也不是自动切换/签到的候选
+	//（旧配置缺省该字段视为启用）。
+	Disabled bool `json:"disabled,omitempty"`
 	// AutoCheckin enables the daily automatic check-in for this account.
 	AutoCheckin bool `json:"auto_checkin,omitempty"`
 	// CheckinTime is this account's daily check-in time ("HH:MM", local server
@@ -726,6 +732,46 @@ func (s *Store) UpdateAccountNote(id, note string) error {
 		return fmt.Errorf("账号不存在: %s", id)
 	}
 	return s.save()
+}
+
+// SetAccountEnabled toggles a pool account's participation in routing,
+// auto-switch and scheduled check-ins.
+func (s *Store) SetAccountEnabled(id string, disabled bool) error {
+	s.mu.Lock()
+	found := false
+	for i := range s.config.Accounts {
+		if s.config.Accounts[i].ID == id {
+			s.config.Accounts[i].Disabled = disabled
+			found = true
+			break
+		}
+	}
+	s.mu.Unlock()
+	if !found {
+		return fmt.Errorf("账号不存在: %s", id)
+	}
+	return s.save()
+}
+
+// SetMaxConcurrency validates and persists the panel-configured per-account
+// upstream concurrency window (1-32, mirroring the env override's bounds).
+// Takes effect lazily as each account's bridge is rebuilt.
+func (s *Store) SetMaxConcurrency(n int) error {
+	if n < 1 || n > 32 {
+		return fmt.Errorf("并发上限需在 1-32 之间")
+	}
+	s.mu.Lock()
+	s.config.MaxConcurrency = n
+	s.mu.Unlock()
+	return s.save()
+}
+
+// GetMaxConcurrency returns the panel-configured concurrency window; 0 means
+// unset (callers fall back to the QODER_MAX_CONCURRENCY env override).
+func (s *Store) GetMaxConcurrency() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.config.MaxConcurrency
 }
 
 // SetAccountWeight updates one account's routing weight (1..MaxAccountWeight).

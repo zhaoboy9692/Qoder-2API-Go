@@ -143,15 +143,27 @@ func (p *bridgeProvider) setOnPatChange(fn func()) {
 // part of the signature: it is display-only, and a label edit must not reset a
 // warmed-up session and machine fingerprint. Safe for concurrent use; never
 // holds the lock across upstream work.
+// maxConcurrency is the effective per-account upstream concurrency window:
+// the panel value wins, otherwise the QODER_MAX_CONCURRENCY env override,
+// otherwise 1.
+func (p *bridgeProvider) maxConcurrency() int {
+	if v := p.store.GetMaxConcurrency(); v > 0 {
+		return v
+	}
+	return bridge.MaxConcurrencyFromEnv()
+}
+
 func (p *bridgeProvider) bridgeForAccount(acc store.Account) *bridge.OpenAiBridge {
-	sig := acc.PAT + "|" + acc.Region
+	// 面板并发值优先，未设置回退环境变量；并发变更也会触发重建。
+	n := p.maxConcurrency()
+	sig := acc.PAT + "|" + acc.Region + "|" + fmt.Sprint(n)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if b, ok := p.bridges[acc.ID]; ok && p.bridgeSig[acc.ID] == sig {
 		b.SetLabel(accountLabel(acc))
 		return b
 	}
-	b := bridge.NewOpenAiBridge(acc.PAT, auth.RegionByName(acc.Region))
+	b := bridge.NewOpenAiBridgeWithConcurrency(acc.PAT, auth.RegionByName(acc.Region), n)
 	b.SetLabel(accountLabel(acc))
 	p.bridges[acc.ID] = b
 	p.bridgeSig[acc.ID] = sig

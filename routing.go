@@ -109,7 +109,7 @@ func filterRegion(accounts []store.Account, region string) []store.Account {
 // applyThreshold is set — not below the credit threshold. Saturation is checked
 // separately so the router can still queue onto a busy account rather than fail.
 func (r *router) usable(acc store.Account, exclude map[string]bool, cfg store.AutoSwitch, now time.Time, applyThreshold bool) bool {
-	if exclude[acc.ID] {
+	if exclude[acc.ID] || acc.Disabled {
 		return false
 	}
 	snap := r.deps.snapshot(acc.ID)
