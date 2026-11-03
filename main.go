@@ -100,6 +100,7 @@ func newBridgeProvider(st *store.Store) *bridgeProvider {
 		snapshot:    p.snapshotFor,
 		bridge:      p.bridgeForAccount,
 		config:      func() store.AutoSwitch { return st.GetAutoSwitch() },
+		preferred:   func() string { return st.GetActiveAccountID() },
 		markFailure: p.markAccountFailure,
 	})
 	return p
@@ -986,6 +987,11 @@ func main() {
 	adminInst := admin.New(st, modelFetcher, rec, logRec)
 	// Per-account runtime for the panel: in-flight, capacity and cumulative
 	// request count (shows how the router spreads load).
+	// Panel/auto account switches rebind routing immediately: clear sticky
+	// bindings so the newly-active account starts serving new conversations.
+	adminInst.SetAccountSwitchedHook(func() {
+		provider.router.ResetSticky()
+	})
 	adminInst.SetAccountRuntime(func(accountID string) (int, int, int64) {
 		inflight, capacity := 0, 0
 		if acc, ok := st.GetAccount(accountID); ok {

@@ -182,11 +182,6 @@ PAGE('token', {
     return this.fmtCredits(s.remaining) + ' / ' + this.fmtCredits(s.total);
   },
   /* 区域标签：账号所属的 Qoder 部署（国内 / 国际） */
-  accountRegion(acc){
-    if(acc.region === 'global') return '国际版';
-    if(acc.region === 'auto') return '默认(自动)';
-    return '国内版';
-  },
   /* 状态：按实时在途判断账号是否正在服务请求（而非“默认账号”标记）。
    * 多个对话并发时，会有多个账号同时显示「使用中」。 */
   accountStatus(acc){

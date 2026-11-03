@@ -54,6 +54,7 @@ type Admin struct {
 	stats            *stats.Recorder
 	logRec           *logs.Recorder
 	accountChecker   AccountChecker
+	onAccountSwitch  func()
 	accountRuntime   AccountRuntime
 	accountCheckiner AccountCheckiner
 	sessions         map[string]time.Time
@@ -81,6 +82,9 @@ func New(s *store.Store, mf ModelFetcher, rec *stats.Recorder, lr *logs.Recorder
 func (a *Admin) SetAccountChecker(fn AccountChecker) {
 	a.accountChecker = fn
 }
+
+// SetAccountSwitchedHook installs the post-switch callback (routing rebind).
+func (a *Admin) SetAccountSwitchedHook(fn func()) { a.onAccountSwitch = fn }
 
 // SetAccountRuntime installs the per-account concurrency reporter used by the
 // account list. Wiring happens before the server starts serving.
@@ -846,6 +850,9 @@ func (a *Admin) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 	if err := a.store.ActivateAccount(body.ID); err != nil {
 		writeJSONError(w, 404, err.Error())
 		return
+	}
+	if a.onAccountSwitch != nil {
+		a.onAccountSwitch()
 	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }

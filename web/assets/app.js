@@ -61,7 +61,7 @@ function appShell(){
     logs:[], logTotal:0, logPage:1, logPageSize:20,
     logFilter:{model:'',key_id:'',status:''}, _logT:0,
     keyForm:{key:'',note:''}, keyModal:false,
-    accounts:[], accountModal:false, accountForm:{pat:'',note:'',region:'cn'},
+    accounts:[], accountModal:false, accountForm:{pat:'',note:'',region:'auto'},
     noteModal:false, noteForm:{id:'',note:''}, checkingId:'', bulkChecking:false,
     autoSwitch:{enabled:false, threshold:20, strategy:'sticky', sticky_limit:30, max_retry_accounts:3, max_concurrency:1},
     models:{models:[],loading:false},

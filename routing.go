@@ -43,10 +43,14 @@ type binding struct {
 // routerDeps is the read-only view of the provider the router needs. Keeping it
 // as callbacks avoids a lock-order tangle between the router and bridgeProvider.
 type routerDeps struct {
-	accounts    func() []store.Account
-	snapshot    func(id string) *store.AccountSnapshot
-	bridge      func(acc store.Account) *bridge.OpenAiBridge
-	config      func() store.AutoSwitch
+	accounts func() []store.Account
+	snapshot func(id string) *store.AccountSnapshot
+	bridge   func(acc store.Account) *bridge.OpenAiBridge
+	config   func() store.AutoSwitch
+	// preferred returns the panel's active/primary account ID: new sticky
+	// conversations bind to it first (when usable), so panel account switches
+	// take effect immediately. Empty/nil = legacy behaviour (plain rotation).
+	preferred   func() string
 	markFailure func(accountID string, cooldownUntil int64)
 }
 
@@ -248,6 +252,35 @@ func (r *router) pick(apiKeyID, bareModel, seed string, filter models.RegionFilt
 		r.mu.Unlock()
 	}
 
+	// Panel switch semantics: for a route never served before (empty cursor)
+	// the first conversation binds to the active/primary account, so switching
+	// accounts in the panel takes effect on the next request. Routes that have
+	// already rotated keep rotating — pinning them back to the primary would
+	// defeat StickyLimit and re-concentrate load on one account.
+	if cfg.Strategy != store.StrategyRoundRobin && r.deps.preferred != nil {
+		if pref := r.deps.preferred(); pref != "" {
+			r.mu.Lock()
+			fresh := r.cursor[filter.String()+"|"+bareModel] == ""
+			r.mu.Unlock()
+			if fresh {
+				for _, acc := range pickFrom {
+					if acc.ID == pref {
+						r.mu.Lock()
+						// 推进轮换游标（与 rotate 行为一致），保证 StickyLimit
+						// 触发轮换时从主账号的下一个继续，而不是回到它自己。
+						r.cursor[filter.String()+"|"+bareModel] = pref
+						// count 起始 -1：预绑定发生在首请求内（该请求本身已消费
+						// 一次配额），而上游轨迹里首次绑定由成功回调 bind 完成
+						//（count=0，随后复用才递增）。-1 使两者计数轨迹对齐，
+						// StickyLimit 轮换时机不变。
+						r.sticky[stickyKey] = &binding{accountID: pref, count: -1, expiresAt: now.Add(stickyTTL)}
+						r.mu.Unlock()
+						return acc, stickyKey, true
+					}
+				}
+			}
+		}
+	}
 	acc := r.rotate(pickFrom, filter, bareModel, cfg.Strategy)
 	return acc, stickyKey, true
 }
@@ -418,6 +451,16 @@ func (r *router) markFailureFor(accountID string, d time.Duration) {
 		return
 	}
 	r.deps.markFailure(accountID, time.Now().Add(d).Unix())
+}
+
+// ResetSticky clears every conversation binding and the rotation cursors so
+// the next requests rebind from scratch (used when the panel switches the
+// primary account, making the switch visible immediately).
+func (r *router) ResetSticky() {
+	r.mu.Lock()
+	r.sticky = make(map[string]*binding)
+	r.cursor = make(map[string]string)
+	r.mu.Unlock()
 }
 
 func stickyKeyFor(apiKeyID, seed string) string {
