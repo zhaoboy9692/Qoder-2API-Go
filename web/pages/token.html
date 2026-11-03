@@ -48,7 +48,8 @@
                     <td>
                       <div class="row" style="gap:2px;flex-wrap:nowrap;justify-content:flex-end">
                         <button class="btn btn-ghost btn-sm" @click="toggleAccountEnabled(acc)" x-text="acc.disabled ? '启用' : '停用'"></button>
-                        <button class="btn btn-ghost btn-sm" @click="checkAccount(acc)" :disabled="checkingId===acc.id">
+                        <button class="btn btn-ghost btn-sm" @click="toggleAccountRegion(acc)" x-text="acc.region === 'global' ? '区域:国际' : '区域:国内'"></button>
+                                                <button class="btn btn-ghost btn-sm" @click="checkAccount(acc)" :disabled="checkingId===acc.id">
                           <span class="spin" x-show="checkingId===acc.id"></span>
                           <span x-show="checkingId!==acc.id">检测</span>
                         </button>

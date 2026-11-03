@@ -774,6 +774,30 @@ func (s *Store) GetMaxConcurrency() int {
 	return s.config.MaxConcurrency
 }
 
+// SetAccountRegion updates one account's upstream region ("cn"/"global";
+// empty follows the legacy default). Takes effect lazily: the account's
+// bridge is rebuilt on its next request because the cache signature
+// (PAT|region) changes.
+func (s *Store) SetAccountRegion(id, region string) error {
+	if region != "cn" && region != "global" && region != "" {
+		return fmt.Errorf("区域仅支持 cn / global")
+	}
+	s.mu.Lock()
+	found := false
+	for i := range s.config.Accounts {
+		if s.config.Accounts[i].ID == id {
+			s.config.Accounts[i].Region = region
+			found = true
+			break
+		}
+	}
+	s.mu.Unlock()
+	if !found {
+		return fmt.Errorf("账号不存在: %s", id)
+	}
+	return s.save()
+}
+
 // SetAccountWeight updates one account's routing weight (1..MaxAccountWeight).
 func (s *Store) SetAccountWeight(id string, weight int) error {
 	if weight < 1 || weight > MaxAccountWeight {

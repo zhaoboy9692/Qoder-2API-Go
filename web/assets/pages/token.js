@@ -97,6 +97,20 @@ PAGE('token', {
     } finally { this.bulkChecking = false; this.loadAccounts(); }
   },
 
+  /* 区域切换：cn(国内) ↔ global(国际)。两区 PAT 不通用，切错会检测失败 */
+  toggleAccountRegion(acc){
+    const to = acc.region === 'global' ? 'cn' : 'global';
+    const label = to === 'global' ? '国际区（qoder.sh）' : '国内区（qoder.com.cn）';
+    this.askConfirm('切换账号区域', '将「'+(acc.note||acc.pat_masked)+'」的上游区域切换为 '+label+'。两区 PAT 不通用，切错区域会导致请求 401。', ()=>{
+      this.busy(async()=>{
+        await this.api('/admin/api/accounts/region',{method:'POST',body:JSON.stringify({
+          id: acc.id, region: to })});
+        this.toast('区域已切换为 '+label,'ok');
+        this.loadAccounts();
+      })();
+    }, {okText:'切换区域', danger:false});
+  },
+
   async checkAccount(acc){
     this.checkingId = acc.id;
     try{

@@ -113,6 +113,7 @@ func (a *Admin) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/accounts/enabled", a.requireAuth(a.handleAccountEnabled))
 	mux.HandleFunc("/admin/api/accounts/note", a.requireAuth(a.handleAccountNote))
 	mux.HandleFunc("/admin/api/accounts/weight", a.requireAuth(a.handleAccountWeight))
+	mux.HandleFunc("/admin/api/accounts/region", a.requireAuth(a.handleAccountRegion))
 	mux.HandleFunc("/admin/api/accounts/check", a.requireAuth(a.handleAccountCheck))
 	mux.HandleFunc("/admin/api/accounts/checkin", a.requireAuth(a.handleAccountCheckin))
 	mux.HandleFunc("/admin/api/accounts/checkin-setting", a.requireAuth(a.handleAccountCheckinSetting))
@@ -866,6 +867,29 @@ func (a *Admin) handleAccountNote(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := a.store.UpdateAccountNote(body.ID, body.Note); err != nil {
 		writeJSONError(w, 404, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+// handleAccountRegion serves POST /admin/api/accounts/region {id, region}:
+// sets a pool account's upstream region ("cn"/"global"; "" = legacy default).
+// 两区 PAT 不通用，混合账号池必须逐账号指定。
+func (a *Admin) handleAccountRegion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, 405, "方法不允许")
+		return
+	}
+	var body struct {
+		ID     string `json:"id"`
+		Region string `json:"region"`
+	}
+	if err := readJSON(w, r, &body); err != nil {
+		writeJSONError(w, 400, "请求格式错误")
+		return
+	}
+	if err := a.store.SetAccountRegion(body.ID, body.Region); err != nil {
+		writeJSONError(w, 400, err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]string{"status": "ok"})
