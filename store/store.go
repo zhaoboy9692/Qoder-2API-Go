@@ -779,8 +779,9 @@ func (s *Store) GetMaxConcurrency() int {
 // bridge is rebuilt on its next request because the cache signature
 // (PAT|region) changes.
 func (s *Store) SetAccountRegion(id, region string) error {
-	if region != "cn" && region != "global" && region != "" {
-		return fmt.Errorf("区域仅支持 cn / global")
+	// "auto"/空 = 默认：首次使用时按 PAT 自动探测实际区域。
+	if region != "cn" && region != "global" && region != "auto" && region != "" {
+		return fmt.Errorf("区域仅支持 cn / global / auto")
 	}
 	s.mu.Lock()
 	found := false

@@ -97,19 +97,23 @@ PAGE('token', {
     } finally { this.bulkChecking = false; this.loadAccounts(); }
   },
 
-  /* 区域切换：cn(国内) ↔ global(国际)。两区 PAT 不通用，切错会检测失败 */
+  /* 区域切换三态循环：国际(global) → 默认(auto，自动检测) → 国内(cn) → 国际…
+   * 默认=首次使用时按 PAT 自动探测实际区域；两区 PAT 不通用，显式选错会 401。 */
   toggleAccountRegion(acc){
-    const to = acc.region === 'global' ? 'cn' : 'global';
-    const label = to === 'global' ? '国际区（qoder.sh）' : '国内区（qoder.com.cn）';
-    this.askConfirm('切换账号区域', '将「'+(acc.note||acc.pat_masked)+'」的上游区域切换为 '+label+'。两区 PAT 不通用，切错区域会导致请求 401。', ()=>{
+    const cur = acc.region === 'global' ? 'global' : (acc.region === 'auto' ? 'auto' : 'cn');
+    const next = cur === 'global' ? 'auto' : (cur === 'auto' ? 'cn' : 'global');
+    const label = { global:'国际版（qoder.sh）', auto:'默认（自动检测）', cn:'国内版（qoder.com.cn）' }[next];
+    this.askConfirm('切换账号区域', '将「'+(acc.note||acc.pat_masked)+'」的区域切换为 '+label+'。'
+      + (next==='auto' ? '默认=首次使用时自动探测该 PAT 所在区域。' : '两区 PAT 不通用，显式选错区域会导致请求 401。'), ()=>{
       this.busy(async()=>{
         await this.api('/admin/api/accounts/region',{method:'POST',body:JSON.stringify({
-          id: acc.id, region: to })});
+          id: acc.id, region: next })});
         this.toast('区域已切换为 '+label,'ok');
         this.loadAccounts();
       })();
     }, {okText:'切换区域', danger:false});
   },
+
 
   async checkAccount(acc){
     this.checkingId = acc.id;
@@ -179,7 +183,9 @@ PAGE('token', {
   },
   /* 区域标签：账号所属的 Qoder 部署（国内 / 国际） */
   accountRegion(acc){
-    return acc.region === 'global' ? '国际版' : '国内版';
+    if(acc.region === 'global') return '国际版';
+    if(acc.region === 'auto') return '默认(自动)';
+    return '国内版';
   },
   /* 状态：按实时在途判断账号是否正在服务请求（而非“默认账号”标记）。
    * 多个对话并发时，会有多个账号同时显示「使用中」。 */
