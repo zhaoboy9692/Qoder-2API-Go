@@ -97,6 +97,17 @@ PAGE('token', {
     } finally { this.bulkChecking = false; this.loadAccounts(); }
   },
 
+  /* 切换主账号：立即生效——清空粘性绑定，新会话优先路由到该账号 */
+  switchAccount(acc){
+    this.askConfirm('切换主账号', '将主账号切换为「'+(acc.note||acc.pat_masked)+'」。切换立即生效：新的对话会话将优先路由到该账号（原会话走完当前粘性周期）。', ()=>{
+      this.busy(async()=>{
+        await this.api('/admin/api/accounts/switch',{method:'POST',body:JSON.stringify({id:acc.id})});
+        this.toast('已切换主账号为 '+(acc.note||acc.pat_masked),'ok');
+        this.loadAccounts();
+      })();
+    }, {okText:'切换', danger:false});
+  },
+
   /* 区域切换三态循环：国际(global) → 默认(auto，自动检测) → 国内(cn) → 国际…
    * 默认=首次使用时按 PAT 自动探测实际区域；两区 PAT 不通用，显式选错会 401。 */
   toggleAccountRegion(acc){
