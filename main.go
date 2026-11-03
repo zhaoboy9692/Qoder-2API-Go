@@ -86,13 +86,13 @@ func newBridgeProvider(st *store.Store) *bridgeProvider {
 	}
 	p.router = newRouter(routerDeps{
 		accounts: func() []store.Account {
-			// region=auto（默认）的账号在此改写为探测出的实际区域，
-			// 使区域过滤/建桥签名都按探测值工作。探测带进程内缓存，
-			// 仅首次请求付出一次 jobToken 往返。
+			// region=auto（默认）的账号在此改写为已探测出的实际区域。
+			// 绝不阻塞：探测在后台异步进行（见 autoRegionAsync），
+			// 未出结果的账号按历史默认 cn 放行，探测完成后下个请求生效。
 			list := st.ListAccounts()
 			for i := range list {
 				if list[i].Region == "auto" || list[i].Region == "" {
-					list[i].Region = p.autoRegionFor(list[i])
+					list[i].Region = p.autoRegionCached(list[i])
 				}
 			}
 			return list
@@ -177,37 +177,44 @@ func (p *bridgeProvider) maxConcurrency() int {
 // first, then cn). Result is cached for the process lifetime; a probe costs
 // one upstream round-trip per account per restart. Transport-level errors do
 // not pin a verdict (returns the legacy cn default and retries next request).
-func (p *bridgeProvider) autoRegionFor(acc store.Account) string {
+// autoRegionCached 返回已探测的区域；未探测时返回 cn（上游历史默认）并
+// 触发一次后台探测——探测结果写入缓存后，下一个请求即按真实区域路由。
+func (p *bridgeProvider) autoRegionCached(acc store.Account) string {
 	if v, ok := p.autoRegion.Load(acc.ID); ok {
 		return v.(string)
 	}
-	p.autoMu.Lock()
-	defer p.autoMu.Unlock()
-	if v, ok := p.autoRegion.Load(acc.ID); ok {
-		return v.(string)
-	}
-	for _, region := range []*auth.RegionConfig{auth.Global, auth.CN} {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		_, err := auth.ExchangeJobToken(ctx, acc.PAT,
-			uuid.New().String(), uuid.New().String()[:32], uuid.New().String()[:18], region)
-		cancel()
-		if err == nil {
-			p.autoRegion.Store(acc.ID, region.Name)
-			log.Printf("[router] auto region detected for %s: %s", accountLabel(acc), region.Name)
-			return region.Name
-		}
-		var ae *auth.AuthError
-		if !errors.As(err, &ae) || (ae.StatusCode != 401 && ae.StatusCode != 403) {
-			// 网络/5xx 等非判定性失败：不落结论，按历史默认 cn 放行并下次重试
-			log.Printf("[router] auto region probe inconclusive for %s (%v); defaulting to cn this request", accountLabel(acc), err)
-			return "cn"
-		}
-	}
-	// 两区都 401/403：PAT 无效。缓存 cn（上游历史默认）避免反复探测，
-	// 面板的「检测」会如实显示失败。
-	p.autoRegion.Store(acc.ID, "cn")
-	log.Printf("[router] auto region probe failed on both endpoints for %s (PAT likely invalid); defaulting to cn", accountLabel(acc))
+	p.autoRegionAsync(acc)
 	return "cn"
+}
+
+// autoRegionAsync probes both regional endpoints with a lightweight
+// PAT→jobToken exchange (global first, then cn) off the request path.
+func (p *bridgeProvider) autoRegionAsync(acc store.Account) {
+	if _, running := p.autoRegion.LoadOrStore(acc.ID+"|probing", true); running {
+		return // already probing
+	}
+	go func() {
+		defer p.autoRegion.Delete(acc.ID + "|probing")
+		for _, region := range []*auth.RegionConfig{auth.Global, auth.CN} {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			_, err := auth.ExchangeJobToken(ctx, acc.PAT,
+				uuid.New().String(), uuid.New().String()[:32], uuid.New().String()[:18], region)
+			cancel()
+			if err == nil {
+				p.autoRegion.Store(acc.ID, region.Name)
+				log.Printf("[router] auto region detected for %s: %s", accountLabel(acc), region.Name)
+				return
+			}
+			var ae *auth.AuthError
+			if errors.As(err, &ae) && ae.StatusCode != 401 && ae.StatusCode != 403 {
+				log.Printf("[router] auto region probe inconclusive for %s (%v); will retry", accountLabel(acc), err)
+				return // non-verdict failure: retry on a later request
+			}
+		}
+		// 两区都 401/403：PAT 无效。缓存 cn 避免反复探测，面板「检测」会如实报错。
+		p.autoRegion.Store(acc.ID, "cn")
+		log.Printf("[router] auto region probe failed on both endpoints for %s (PAT likely invalid); defaulting to cn", accountLabel(acc))
+	}()
 }
 
 func (p *bridgeProvider) bridgeForAccount(acc store.Account) *bridge.OpenAiBridge {
