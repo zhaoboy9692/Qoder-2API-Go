@@ -2164,7 +2164,7 @@ func TestChatHandlerFailoverRetriesOnAnotherAccount(t *testing.T) {
 	bad := newFailoverBridge(t, &failoverGateway{unauthorizedFirstN: 99})
 	good := newFailoverBridge(t, &failoverGateway{})
 	calls := 0
-	failover := func(failed string, req ResolveRequest, excluded map[string]bool) *ResolvedBridge {
+	failover := func(failed string, req ResolveRequest, excluded map[string]bool, authErr *auth.AuthError) *ResolvedBridge {
 		calls++
 		if !excluded[failed] {
 			t.Errorf("failed account %q must be in the excluded set", failed)

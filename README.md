@@ -35,9 +35,10 @@
 | GLM-5.2 | gm51model |
 | Kimi-K3 | kmodel_latest |
 | Kimi-K2.8-Preview | kmodel |
+| MiniMax-M3.1-Flash | m31model |
 | MiniMax-M2.7 | mmodel |
 
-> 以上为内置默认列表（catalog-v7，2026-10-07），实际可用模型以网关动态返回为准。
+> 以上为内置默认列表（catalog-v7，2026-10-07），实际可用模型以网关动态返回为准。新增 **MiniMax-M3.1-Flash**（m31model）已加入动态目录；下列历史模型可能随官方下架而移除：Qwen3.7-Max/Plus/Flash、Performance、GLM-5.2、MiniMax-M2.7。
 >
 > **关于图片输入**：部分模型并非原生多模态，而是由网关对图片附带辅助识别（非原生多模态模型加上辅助后实际可以识图），因此上表不再标注是否支持视觉；识图效果以实际调用结果为准。
 

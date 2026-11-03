@@ -60,7 +60,9 @@ type ResolveRequest struct {
 // the router for a replacement account (excluding every account already tried).
 // It returns the replacement bridge (nil = give up, surface the original error).
 // Implemented by the caller (main package); nil keeps the legacy behaviour.
-type FailoverFunc func(failedAccountID string, req ResolveRequest, excluded map[string]bool) *ResolvedBridge
+// FailoverFunc reports an upstream auth failure (with its classified error)
+// on the given account and asks for a replacement bridge.
+type FailoverFunc func(failedAccountID string, req ResolveRequest, excluded map[string]bool, authErr *auth.AuthError) *ResolvedBridge
 
 // UsageHook receives every usage frame together with the account that served
 // the request (empty when unknown), enabling passive credit deduction for
@@ -237,7 +239,7 @@ func MakeChatHandler(resolver BridgeResolver, rec *stats.Recorder, lr *logs.Reco
 				!errors.As(err, &repErr) && !errors.Is(err, context.Canceled) {
 				// Exclude the account that just failed, then ask for another.
 				routeReq.Exclude[rb.AccountID] = true
-				if next := failover(rb.AccountID, routeReq, routeReq.Exclude); next != nil && next.Bridge != nil {
+				if next := failover(rb.AccountID, routeReq, routeReq.Exclude, authErr); next != nil && next.Bridge != nil {
 					log.Printf("[bridge] upstream auth failure on account %s; retrying on another account", rb.AccountID)
 					rb, b = next, next.Bridge
 					entry.KeyID, entry.KeyNote = next.KeyID, next.KeyNote
@@ -389,8 +391,9 @@ func handleChatError(w http.ResponseWriter, entry *logs.LogEntry, record func(bo
 		// this point). Passing the upstream 401 through would make every
 		// client believe its own key is invalid, so this is reported as a
 		// bad-gateway fault with the (redacted) upstream detail.
-		entry.StatusCode, entry.ErrorMsg = 502, truncateRunes("upstream auth: "+authErr.Error(), 500)
-		writeError(w, 502, "upstream_error", "upstream auth: "+authErr.Error())
+		msg := "upstream auth: " + auth.FriendlyAuthMessage(authErr)
+		entry.StatusCode, entry.ErrorMsg = 502, truncateRunes(msg, 500)
+		writeError(w, 502, "upstream_error", msg)
 		record(false)
 		return
 	}

@@ -408,10 +408,16 @@ func (r *router) pruneSticky(now time.Time) {
 // markFailure records an upstream auth failure so the account is skipped for a
 // short window. The snapshot is memory-only and rides the 30s flush.
 func (r *router) markFailure(accountID string) {
+	r.markFailureFor(accountID, routerFailureCooldown)
+}
+
+// markFailureFor records an upstream failure with an explicit cooldown window
+// (e.g. 12h for daily billing-count limits, 5m for transient auth blips).
+func (r *router) markFailureFor(accountID string, d time.Duration) {
 	if accountID == "" {
 		return
 	}
-	r.deps.markFailure(accountID, time.Now().Add(routerFailureCooldown).Unix())
+	r.deps.markFailure(accountID, time.Now().Add(d).Unix())
 }
 
 func stickyKeyFor(apiKeyID, seed string) string {

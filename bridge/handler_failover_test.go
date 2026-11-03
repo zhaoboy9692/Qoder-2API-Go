@@ -81,7 +81,7 @@ func TestChatHandlerFailoverRetriesOnAuthError(t *testing.T) {
 	good := newFailoverBridge(t, gwGood)
 
 	calls := 0
-	failover := func(failedAccountID string, _ ResolveRequest, _ map[string]bool) *ResolvedBridge {
+	failover := func(failedAccountID string, _ ResolveRequest, _ map[string]bool, _ *auth.AuthError) *ResolvedBridge {
 		calls++
 		return &ResolvedBridge{Bridge: good, AccountID: "acc2"}
 	}
@@ -117,7 +117,7 @@ func TestChatHandlerFailoverGivesUpSurfaces502(t *testing.T) {
 	gw := &failoverGateway{unauthorizedFirstN: 99}
 	bad := newFailoverBridge(t, gw)
 
-	failover := func(string, ResolveRequest, map[string]bool) *ResolvedBridge { return nil }
+	failover := func(string, ResolveRequest, map[string]bool, *auth.AuthError) *ResolvedBridge { return nil }
 	handler := MakeChatHandler(
 		func(ResolveRequest) *ResolvedBridge { return &ResolvedBridge{Bridge: bad, AccountID: "acc1"} },
 		nil, nil, failover, nil)
@@ -144,7 +144,7 @@ func TestChatHandlerFailoverSkipsCommittedStream(t *testing.T) {
 	good := newFailoverBridge(t, &failoverGateway{})
 
 	calls := 0
-	failover := func(string, ResolveRequest, map[string]bool) *ResolvedBridge {
+	failover := func(string, ResolveRequest, map[string]bool, *auth.AuthError) *ResolvedBridge {
 		calls++
 		return &ResolvedBridge{Bridge: good, AccountID: "acc2"}
 	}

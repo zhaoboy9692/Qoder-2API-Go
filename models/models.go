@@ -50,18 +50,19 @@ var DefaultModelMap = map[string]string{
 // catalog (display_name). NOTE: the gateway's is_vl flags have proven
 // unreliable — do not treat this as an authoritative capability matrix.
 var DefaultVisionModels = map[string]bool{
-	"Qwen3.8-Max":       true,
-	"Qwen3.8-Flash":     true,
-	"Qwen3.7-Max":       true,
-	"Qwen3.7-Plus":      true,
-	"Qwen3.7-Flash":     true,
-	"DeepSeek-V4-Pro":   true,
-	"DeepSeek-Flash":    true,
-	"GLM-5.3":           true,
-	"GLM-5.3-Flash":     true,
-	"GLM-5.2":           true,
-	"Kimi-K3":           true,
-	"Kimi-K2.8-Preview": true,
+	"Qwen3.8-Max":        true,
+	"Qwen3.8-Flash":      true,
+	"Qwen3.7-Max":        true,
+	"Qwen3.7-Plus":       true,
+	"Qwen3.7-Flash":      true,
+	"DeepSeek-V4-Pro":    true,
+	"DeepSeek-Flash":     true,
+	"GLM-5.3":            true,
+	"GLM-5.3-Flash":      true,
+	"GLM-5.2":            true,
+	"Kimi-K3":            true,
+	"Kimi-K2.8-Preview":  true,
+	"MiniMax-M3.1-Flash": true,
 }
 
 // PreferredDefaultKey is the default model key when model param is None/empty.

@@ -460,8 +460,16 @@ func clearAccountOnPatChange(rec *stats.Recorder) {
 // handleChatFailover implements bridge.FailoverFunc: mark the failed account
 // cooling, exclude it, and route the request to another account. Returns nil
 // when no other account can serve it (the original error surfaces).
-func (p *bridgeProvider) handleChatFailover(failedAccountID string, req bridge.ResolveRequest, excluded map[string]bool) *bridge.ResolvedBridge {
-	p.router.markFailure(failedAccountID)
+func (p *bridgeProvider) handleChatFailover(failedAccountID string, req bridge.ResolveRequest, excluded map[string]bool, authErr *auth.AuthError) *bridge.ResolvedBridge {
+	// 当日计费次数超限（Qoder 以 Login expired/Billing daily count 话术包装
+	// 在 401 里）：该账号次日才恢复，用长冷却替代默认 5 分钟，避免每 5 分钟
+	// 重复撞限产生大量失败请求。
+	if authErr != nil && (strings.Contains(authErr.Detail, "Billing daily count exceeded") ||
+		strings.Contains(authErr.Detail, "Login expired")) {
+		p.router.markFailureFor(failedAccountID, 12*time.Hour)
+	} else {
+		p.router.markFailure(failedAccountID)
+	}
 	if excluded == nil {
 		excluded = map[string]bool{}
 	}
@@ -974,8 +982,8 @@ func main() {
 	mux := http.NewServeMux()
 	// failover routes a chat-path auth failure to another account (excluding
 	// every account already tried) and returns its bridge for the retry.
-	failover := func(failedAccountID string, req bridge.ResolveRequest, excluded map[string]bool) *bridge.ResolvedBridge {
-		return provider.handleChatFailover(failedAccountID, req, excluded)
+	failover := func(failedAccountID string, req bridge.ResolveRequest, excluded map[string]bool, authErr *auth.AuthError) *bridge.ResolvedBridge {
+		return provider.handleChatFailover(failedAccountID, req, excluded, authErr)
 	}
 	// usageHook feeds the usage sink with the serving account: billed credits
 	// passively deduct that account's snapshot (the router then avoids it once

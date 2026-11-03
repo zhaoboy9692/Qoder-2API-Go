@@ -543,7 +543,7 @@ func TestFailoverRoutesToAnotherAccount(t *testing.T) {
 	// 用真实 key 才能通过 LookupKey。
 	key, _ := s.AddKey("sk-test", "")
 	_ = key
-	next := p.handleChatFailover(acc1, req, map[string]bool{})
+	next := p.handleChatFailover(acc1, req, map[string]bool{}, nil)
 	if next == nil {
 		t.Fatal("failover should route to another account")
 	}

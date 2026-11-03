@@ -56,7 +56,7 @@ var CN = &RegionConfig{
 // api1.qoder.sh; quota/billing through openapi.qoder.sh and require a separate
 // OpenAPI bearer token.
 var Global = &RegionConfig{
-	Name:              "global",
+	Name: "global",
 	// 国际区端点采用线上多实例实测可用的组合：center 负责鉴权（jobToken/status），
 	// api3 负责聊天 SSE，openapi 负责额度。上游曾用 api1.qoder.sh（另一 CA 节点），
 	// 国际 PAT 会话建立全 401；改回本组合后国际账号会话/对话/额度全部正常。
@@ -384,6 +384,18 @@ func ComposeBearer(payloadB64, sig string) string {
 type AuthError struct {
 	StatusCode int
 	Detail     string
+}
+
+// FriendlyAuthMessage returns the auth-error text, appending a Chinese hint
+// when the upstream rejection is actually a daily billing-count limit. Qoder
+// reports that condition as "Login expired"/"Billing daily count exceeded"
+// under a 401/403 envelope, which reads like a credential failure to end users.
+func FriendlyAuthMessage(e *AuthError) string {
+	s := e.Error()
+	if strings.Contains(e.Detail, "Billing daily count exceeded") || strings.Contains(e.Detail, "Login expired") {
+		s += "（当日请求次数上限）"
+	}
+	return s
 }
 
 func (e *AuthError) Error() string {
