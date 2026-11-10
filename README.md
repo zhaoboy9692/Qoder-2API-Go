@@ -40,6 +40,8 @@
 
 > 以上为内置默认列表（catalog-v7，2026-10-07），实际可用模型以网关动态返回为准。新增 **MiniMax-M3.1-Flash**（m31model）已加入动态目录；下列历史模型可能随官方下架而移除：Qwen3.7-Max/Plus/Flash、Performance、GLM-5.2、MiniMax-M2.7。
 >
+> 动态列表由网关 `model/list` 的 `chat` 与 `app` 两个 scene 合并而成（按显示名去重，`chat` 优先），因为个别模型只出现在单个 scene 中——例如限时匿名模型 QoDuck (`lmodel`) 仅出现在 `app` 里，只读 `chat` 会把它整条丢掉。此类限时模型不写入内置默认列表。
+>
 > **关于图片输入**：部分模型并非原生多模态，而是由网关对图片附带辅助识别（非原生多模态模型加上辅助后实际可以识图），因此上表不再标注是否支持视觉；识图效果以实际调用结果为准。
 
 ## 快速开始
@@ -122,8 +124,11 @@ scripts/service.sh update     # 重新构建二进制并重启
 | `QODER_LOG_RETENTION_DAYS` | `90` | 请求日志保留天数，范围 1-3650；超期条目自动删除。设置后管理面板中不可修改 |
 | `QODER_LOG_MAX_ENTRIES` | `2000` | 请求日志条数上限，范围 100-100000；超限时自动删除最旧条目，与保留天数同时生效。设置后管理面板中不可修改 |
 | `QODER_RUNTIME_INFO` | 空 | 覆盖签到用设备指纹 helper 的路径（标准输出 `machineToken/machineType/machineCode`）。未安装 Qoder 桌面 App 时用于提供真实指纹 |
+| `QODER_CORS_ORIGINS` | 空（用面板配置） | 允许跨域访问 `/v1/*` 与 `/health` 的来源：`*` 表示任意来源，或逗号分隔的完整 Origin（如 `https://app.example.com`）。设置后覆盖管理面板「设置 → 跨域（CORS）」里的开关与来源，并锁定面板编辑；未设置时以面板配置为准。自动处理 `OPTIONS` 预检；管理后台接口不参与 CORS。无法解析的条目启动时打印 `WARN` |
 
 > 两个超时也可在管理面板「设置 → 超时配置」中修改，保存后即时生效（无需重启）。响应超时只约束上游「开始响应」，不会截断已经建立的流。
+
+> 跨域来源按完整 Origin（`http(s)://host[:port]`）比对：不支持子域通配（`https://*.example.com` 会被拒绝），且比较时忽略大小写与默认端口（`https://a.com:443` 等同于 `https://a.com`），因为浏览器发送 Origin 时省略默认端口。多个来源用逗号分隔；`*` 与具名来源混用等于全部放行。
 
 > 请求统计（`stats` 字段）与请求日志（`logs` 字段）随 data.json 持久化：服务每 30 秒批量写入一次，并在收到 `SIGINT`/`SIGTERM` 优雅关闭时执行最终落盘；仅统计通过密钥鉴权且请求体合法的调用，客户端主动断开不计入失败。令牌用量（总输入 / 总输出 / 缓存命中 / 实际扣费额度）从网关 usage 帧自动累计，流中断无 usage 帧时仅计次不计量。请求日志同样只记录通过密钥鉴权的调用（鉴权失败不记录），错误信息截断至 500 字符，日志配置亦可在管理面板「设置 → 日志配置」中修改并即时生效。
 
@@ -141,6 +146,8 @@ scripts/service.sh update     # 重新构建二进制并重启
   "idle_timeout_seconds": 300,
   "log_retention_days": 90,
   "log_max_entries": 2000,
+  "cors_enabled": false,
+  "cors_origins": "",
   "api_keys": [
     {
       "id": "xxxxxxxx",
@@ -238,12 +245,12 @@ curl http://localhost:10081/v1/chat/completions \
 
 - **结果三态**：`success`（本次领到积分）/ `already`（今日已签）/ `skipped`（今天没有可签到活动）。真正的失败单独记为 `error`，并把原因写入 `last_checkin_msg`（悬停在「最近结果」上可见）。
 - **调度**：后台每分钟检查一次，到点后按账号 ID 抖动几秒，避免整池同时打接口。同一天已成功 / 已签 / 无活动的不再重试（`skipped` 属于有意不重试：活动未开放时反复请求没有意义）；失败的在 30 分钟内不重试，之后每轮检查都会再试一次（仍在当天内）。
-- **区域**：国内版用 COSY 会话令牌作 Bearer，国际版用 OpenAPI 令牌（自动换取并刷新）；遇到 401 会强制刷新后重试一次。
-- **设备指纹**：签到接口只对携带**真实桌面客户端指纹**的请求返回「每天领 100 Credits」活动，程序因此会从已安装的 Qoder 桌面 App 里读取 `umid/runtime-info` 生成的指纹（Windows：`%LOCALAPPDATA%\Programs\Qoder[ CN]\resources\umid\runtime-info.exe`；macOS：`/Applications/Qoder[ CN].app/Contents/Resources/umid/runtime-info`）。
+- **区域**：两区域的签到端点都使用 OpenAPI 令牌（`jt-`，自动换取并刷新）；遇到 401 会强制刷新后重试一次。
+- **设备指纹**：上游对机器头很敏感——携带一整套**派生**（非真实）机器头会被当作非官方客户端，「每天领 100 Credits」活动被静默过滤。因此程序只在能读到已安装 Qoder 桌面 App 的真实指纹时才发送六个机器头（Windows：`%LOCALAPPDATA%\Programs\Qoder[ CN]\resources\umid\runtime-info.exe`；macOS：`/Applications/Qoder[ CN].app/Contents/Resources/umid/runtime-info`）；读不到时一个机器头都不发，同样能领到每日积分。
 
 > 🕒 **时区**：签到时间按**服务器本地时间**解释，Docker 镜像默认 `TZ=Asia/Shanghai`。国际版账号若希望按本地「新的一天」签到，请把容器的 `TZ` 改成自己的时区。
 
-> ⚠️ **已知限制**：未安装 Qoder 桌面 App 的机器（典型是 Docker / Linux 服务器，目前没有 Linux 候选路径）拿不到真实指纹，退化为 PAT 派生指纹后，上游会把签到请求当作非官方客户端，活动被静默丢弃，结果通常恒为 `already` / `skipped`。此时可用 `QODER_RUNTIME_INFO` 指向一个可执行 helper，其标准输出为 `{"machineToken":"…","machineType":"…","machineCode":"…"}`。
+> ⚠️ **已知限制**：未安装 Qoder 桌面 App 的机器（典型是 Docker / Linux 服务器，目前没有 Linux 候选路径）拿不到真实指纹，此时签到不发送任何机器头，通用「每日领 100 Credits」活动可正常领取；仅设备定向活动是否受影响未验证。如需真实指纹，可用 `QODER_RUNTIME_INFO` 指向一个可执行 helper，其标准输出为 `{"machineToken":"…","machineType":"…","machineCode":"…"}`。
 
 ### 5. 思考强度与参数透传（verbatim 原则）
 

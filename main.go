@@ -342,10 +342,11 @@ func (p *bridgeProvider) releaseCheckin(accountID string) {
 // "error" and the reason in LastCheckinMsg (shown in the panel's recent-result
 // tooltip).
 //
-// Both regions are supported: CN uses the COSY securityOauthToken as the Bearer
-// and global uses the OpenAPI token (the bridge picks the right one). Both rely
-// on the genuine desktop fingerprint from the installed Qoder app, without which
-// the campaign service withholds the daily-credit activity.
+// Both regions are supported: the campaigns endpoint requires the jt- OpenAPI
+// bearer in either region (minted via jobToken/exchange; the bridge picks the
+// right bearer per endpoint). The genuine desktop fingerprint from the
+// installed Qoder app is optional — without it no machine headers are sent and
+// the generic daily-credit activity is still returned.
 func (p *bridgeProvider) CheckinAccount(ctx context.Context, accountID string) (auth.CheckinResult, error) {
 	acc, ok := p.store.GetAccount(accountID)
 	if !ok {
@@ -798,6 +799,15 @@ func main() {
 		}
 	}
 
+	// CORS: warn once if the env override defines nothing that can match,
+	// mirroring how the other env knobs report bad input. A whitespace-only or
+	// unparseable override is then treated as "unset" everywhere (here, in
+	// corsSpec below, and in the admin panel) so the panel cannot advertise a
+	// policy the request path never applies.
+	if v := os.Getenv("QODER_CORS_ORIGINS"); v != "" && store.UsableCORSSpec(v) == "" {
+		log.Printf("[cors] WARN QODER_CORS_ORIGINS=%q defines no usable origin; using panel setting", v)
+	}
+
 	provider := newBridgeProvider(st)
 	// Request statistics recorder with periodic persistence (30s cadence).
 	// The loop also drains a stop channel so graceful shutdown can trigger a
@@ -1088,9 +1098,26 @@ func main() {
 	// Timeouts: ReadHeaderTimeout/IdleTimeout harden against slowloris-style
 	// resource exhaustion. WriteTimeout is intentionally unset so that
 	// long-lived SSE streaming responses are not prematurely cancelled.
+	//
+	// CORS precedence matches the other settings: QODER_CORS_ORIGINS pins the
+	// policy when set, otherwise the admin panel's saved setting applies. The
+	// getter runs per request so panel changes take effect without a restart.
+	// An override that defines no usable origin falls through to the panel,
+	// matching what the admin panel reports.
+	corsSpec := func() string {
+		if env := os.Getenv("QODER_CORS_ORIGINS"); env != "" {
+			if usable := store.UsableCORSSpec(env); usable != "" {
+				return usable
+			}
+		}
+		if enabled, origins := st.GetCORS(); enabled {
+			return origins
+		}
+		return ""
+	}
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           corsHandler(corsSpec, mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
