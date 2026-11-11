@@ -36,9 +36,10 @@
 | Kimi-K3 | kmodel_latest |
 | Kimi-K2.8-Preview | kmodel |
 | MiniMax-M3.1-Flash | m31model |
+| Qwen4-Max-Preview（新） | 动态目录自动下发，无需内置 key |
 | MiniMax-M2.7 | mmodel |
 
-> 以上为内置默认列表（catalog-v7，2026-10-07），实际可用模型以网关动态返回为准。新增 **MiniMax-M3.1-Flash**（m31model）已加入动态目录；下列历史模型可能随官方下架而移除：Qwen3.7-Max/Plus/Flash、Performance、GLM-5.2、MiniMax-M2.7。
+> 以上为内置默认列表（catalog-v7，2026-10-07），实际可用模型以网关动态返回为准。动态目录已支持 **MiniMax-M3.1-Flash** 与 **Qwen4-Max-Preview**（Qoder 官方目录自动下发，无需配置）；下列历史模型可能随官方下架而移除：Qwen3.7-Max/Plus/Flash、Performance、GLM-5.2、MiniMax-M2.7。
 >
 > 动态列表由网关 `model/list` 的 `chat` 与 `app` 两个 scene 合并而成（按显示名去重，`chat` 优先），因为个别模型只出现在单个 scene 中——例如限时匿名模型 QoDuck (`lmodel`) 仅出现在 `app` 里，只读 `chat` 会把它整条丢掉。此类限时模型不写入内置默认列表。
 >
