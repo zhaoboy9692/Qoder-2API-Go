@@ -200,15 +200,18 @@ func (b *OpenAiBridge) EnsureAccountStatus(ctx context.Context) *auth.AccountSta
 	if quota.UserType != "" {
 		st.UserType = quota.UserType
 	}
-	// Boundary precedence: the gateway's nextResetAt is authoritative, and the
-	// OpenAPI expiresAt is only a fallback for when it is missing. Plans without
-	// an expiry report the far-future 9999-12-31 sentinel in expiresAt, which
-	// must never be mistaken for the instant the allowance actually refreshes.
-	if !plausibleResetMs(st.NextResetAtMs) {
-		st.NextResetAtMs = 0
-	}
-	if st.NextResetAtMs == 0 && plausibleResetMs(quota.ExpiresAtMs) {
+	// Boundary precedence: the OpenAPI expiresAt wins, because it is the value
+	// Qoder's own usage page renders as the refresh date and it is recomputed
+	// on every refresh. The gateway's nextResetAt is a cached field that can
+	// lag a whole cycle (observed 2026-11-23: it still reported 2026-09-23 for
+	// accounts whose expiresAt was 2026-12-23), so it is only a fallback for
+	// when expiresAt is missing. Plans without an expiry report the far-future
+	// 9999-12-31 sentinel in expiresAt, which must never be mistaken for the
+	// instant the allowance actually refreshes.
+	if plausibleResetMs(quota.ExpiresAtMs) {
 		st.NextResetAtMs = quota.ExpiresAtMs
+	} else if !plausibleResetMs(st.NextResetAtMs) {
+		st.NextResetAtMs = 0
 	}
 	st.IsQuotaExceeded = quota.IsQuotaExceeded
 	st.TotalUsagePercentage = quota.TotalUsagePercentage
