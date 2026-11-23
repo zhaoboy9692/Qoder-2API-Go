@@ -1633,6 +1633,33 @@ func TestEnsureAccountStatusRejectsSentinelResetBoundary(t *testing.T) {
 	}
 }
 
+// The gateway's nextResetAt is cached and can lag a whole cycle: on 2026-11-23
+// it still reported 2026-09-23 while expiresAt said 2026-12-23, the date
+// Qoder's usage page shows. Both values are plausible, so only the precedence
+// decides, and the stale gateway boundary must not win.
+func TestEnsureAccountStatusPrefersExpiresAtOverStaleGatewayBoundary(t *testing.T) {
+	const stale = int64(1790092800000) // 2026-09-23 00:00 CST
+	const fresh = int64(1797955200000) // 2026-12-23 00:00 CST
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/algo/api/v3/user/jobToken", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"name":"tester","id":"uid1","refreshToken":"rt","securityOauthToken":"sot","expireTime":%d}`, time.Now().Add(6*time.Hour).UnixMilli())
+	})
+	mux.HandleFunc("/algo/api/v3/user/status", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"id":"uid1","userType":"teams","plan":"PLAN_TIER_TEAM","nextResetAt":%d}`, stale)
+	})
+	mux.HandleFunc("/api/v2/quota/usage", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"userId":"uid1","userType":"teams","expiresAt":%d,"userQuota":{"total":0,"used":0,"remaining":0,"unit":"credits"}}`, fresh)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	b := NewOpenAiBridge("pt-test", &auth.RegionConfig{Name: "test", AuthBase: srv.URL, ChatBase: srv.URL, OpenAPIBase: srv.URL})
+
+	if st := b.EnsureAccountStatus(context.Background()); st == nil || st.NextResetAtMs != fresh {
+		t.Errorf("NextResetAtMs = %v, want the expiresAt boundary %d", st, fresh)
+	}
+}
+
 // The caller's cap must win over the catalog default, otherwise models with a
 // small advertised cap (the built-in BYOK table lists one at 2048) would have
 // their responses silently truncated.
